@@ -83,7 +83,7 @@ button:
     on_press:
        - tuya_rf.turn_on_receiver:
   - platform: template
-    name:  play/pause
+    name:  play-pause
     web_server:
         sorting_weight:  10
     on_press:
