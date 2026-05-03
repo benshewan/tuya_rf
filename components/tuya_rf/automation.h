@@ -11,7 +11,7 @@ template<typename... Ts> class TurnOffReceiverAction : public Action<Ts...> {
  public:
   TurnOffReceiverAction(TuyaRfComponent *tuya_rf) : tuya_rf_(tuya_rf) {}
 
-  void play(Ts... x) override { this->tuya_rf_->turn_off_receiver(); }
+  void play(Ts... x) override { this->tuya_rf_->turn_off_receiver(); this->play_next_(x...);}
 
  protected:
   TuyaRfComponent *tuya_rf_;
@@ -21,7 +21,7 @@ template<typename... Ts> class TurnOnReceiverAction : public Action<Ts...> {
  public:
   TurnOnReceiverAction(TuyaRfComponent *tuya_rf) : tuya_rf_(tuya_rf) {}
 
-  void play(Ts... x) override { this->tuya_rf_->turn_on_receiver(); }
+  void play(Ts... x) override { this->tuya_rf_->turn_on_receiver(); this->play_next_(x...);}
 
  protected:
   TuyaRfComponent *tuya_rf_;
