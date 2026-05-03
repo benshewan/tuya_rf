@@ -76,12 +76,12 @@ TUYA_RF_ACTION_SCHEMA = cv.Schema(
     }
 )
 
-@automation.register_action("tuya_rf.turn_on_receiver", TurnOnReceiverAction, TUYA_RF_ACTION_SCHEMA)
+@automation.register_action("tuya_rf.turn_on_receiver", TurnOnReceiverAction, TUYA_RF_ACTION_SCHEMA, synchronous=True)
 async def tuya_rf_turn_on_receiver_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_RECEIVER_ID])
     return cg.new_Pvariable(action_id, template_arg, paren)
 
-@automation.register_action("tuya_rf.turn_off_receiver", TurnOffReceiverAction, TUYA_RF_ACTION_SCHEMA)
+@automation.register_action("tuya_rf.turn_off_receiver", TurnOffReceiverAction, TUYA_RF_ACTION_SCHEMA, synchronous=True)
 async def tuya_rf_turn_off_receiver_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_RECEIVER_ID])
     return cg.new_Pvariable(action_id, template_arg, paren)
