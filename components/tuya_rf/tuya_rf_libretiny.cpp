@@ -141,13 +141,13 @@ void TuyaRfComponent::await_target_time_() {
 
 void TuyaRfComponent::mark_(uint32_t usec) {
   this->await_target_time_();
-  this->RemoteTransmitterBase::pin_->digital_write(false);
+  this->RemoteTransmitterBase::pin_->digital_write(true);
   this->target_time_ += usec;
 }
 
 void TuyaRfComponent::space_(uint32_t usec) {
   this->await_target_time_();
-  this->RemoteTransmitterBase::pin_->digital_write(true);
+  this->RemoteTransmitterBase::pin_->digital_write(false);
   this->target_time_ += usec;
 }
 
@@ -189,7 +189,7 @@ void IRAM_ATTR TuyaRfComponent::send_internal(uint32_t send_times, uint32_t send
       return;      
   }
   
-  this->RemoteTransmitterBase::pin_->digital_write(true);
+  this->RemoteTransmitterBase::pin_->digital_write(false);
 
   this->target_time_ = 0;
   //there's an extra delay somewhere, maybe the first call to get_data()
@@ -199,11 +199,9 @@ void IRAM_ATTR TuyaRfComponent::send_internal(uint32_t send_times, uint32_t send
     //InterruptLock lock;
     for (int32_t item : this->RemoteTransmitterBase::temp_.get_data()) {
       if (item > 0) {
-        const auto length = uint32_t(item);
-        this->mark_(length);
+        this->space_(item); // positive -> space -> carrier OFF
       } else {
-        const auto length = uint32_t(-item);
-        this->space_(length);
+        this->mark_(-item); // negative -> mark -> carrier ON
       }
       App.feed_wdt();
     }
