@@ -114,6 +114,7 @@ void TuyaRfComponent::setup() {
 void TuyaRfComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Tuya Rf:");
   ESP_LOGCONFIG(TAG, "  Frequency: %u Hz", this->frequency_hz_);
+  ESP_LOGCONFIG(TAG, "  Invert Signal: %s", this->invert_signal_ ? "true" : "false");
   LOG_PIN("  Sclk Pin: ",this->sclk_pin_);
   LOG_PIN("  Mosi Pin: ",this->mosi_pin_);
   LOG_PIN("  Csb Pin: ",this->csb_pin_);
@@ -209,11 +210,12 @@ void IRAM_ATTR TuyaRfComponent::send_internal(uint32_t send_times, uint32_t send
   for (uint32_t i = 0; i < send_times; i++) {
     //InterruptLock lock;
     for (int32_t item : this->RemoteTransmitterBase::temp_.get_data()) {
-      if (item > 0) {
-        this->space_(item); // positive -> space -> carrier OFF
-      } else {
-        this->mark_(-item); // negative -> mark -> carrier ON
-      }
+      uint32_t dur = (item < 0) ? (uint32_t)(-item) : (uint32_t) item;
+      bool mark = this->invert_signal_ ? (item < 0) : (item > 0);
+      if (mark)
+        this->mark_(dur);   // carrier ON
+      else
+        this->space_(dur);  // carrier OFF
       App.feed_wdt();
     }
     if (i + 1 < send_times && send_wait>0)

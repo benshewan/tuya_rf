@@ -27,6 +27,7 @@ CONF_CSB_PIN = "csb_pin"
 CONF_FCSB_PIN = "fcsb_pin"
 CONF_RECEIVER_ID = "receiver_id"
 CONF_FREQUENCY = "frequency"
+CONF_INVERT_SIGNAL = "invert_signal"
 
 from esphome.core import CORE, TimePeriod
 
@@ -169,6 +170,7 @@ CONFIG_SCHEMA = remote_base.validate_triggers(
                 cv.Range(max=TimePeriod(microseconds=4294967295)),
             ),
             cv.Optional(CONF_FREQUENCY, default="433.92MHz"): validate_frequency,
+            cv.Optional(CONF_INVERT_SIGNAL, default=True): cv.boolean,
         }
     ).extend(cv.COMPONENT_SCHEMA)
 )
@@ -212,4 +214,5 @@ async def to_code(config):
     cg.add(var.set_start_pulse_max_us(config[CONF_START_PULSE_MAX]))
     cg.add(var.set_end_pulse_us(config[CONF_END_PULSE]))
     cg.add(var.set_frequency_hz(config[CONF_FREQUENCY]))
+    cg.add(var.set_invert_signal(config[CONF_INVERT_SIGNAL]))
     validate_pulses(config)
