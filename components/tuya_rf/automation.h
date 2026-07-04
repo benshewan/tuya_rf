@@ -27,6 +27,22 @@ template<typename... Ts> class TurnOnReceiverAction : public Action<Ts...> {
   TuyaRfComponent *tuya_rf_;
 };
 
+template<typename... Ts> class SetFrequencyAction : public Action<Ts...> {
+ public:
+  SetFrequencyAction(TuyaRfComponent *tuya_rf) : tuya_rf_(tuya_rf) {}
+
+  void play(Ts... x) override {
+    this->tuya_rf_->set_frequency(this->frequency_.value(x...));
+    this->play_next_(x...);
+  }
+
+  template<typename T> void set_frequency(T frequency) { this->frequency_ = frequency; }
+
+ protected:
+  TuyaRfComponent *tuya_rf_;
+  TemplatableValue<uint32_t, Ts...> frequency_;
+};
+
 
 }  // namespace tuya_rf
 }  // namespace esphome

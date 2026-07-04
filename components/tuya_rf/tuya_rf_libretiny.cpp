@@ -82,6 +82,15 @@ void TuyaRfComponent::set_receiver(bool on) {
   }
 }
 
+void TuyaRfComponent::set_frequency(uint32_t frequency_hz) {
+  if (RF_SetFrequency(frequency_hz)) {
+    this->frequency_hz_ = frequency_hz;
+    ESP_LOGI(TAG, "RF frequency set to %u Hz (applied on next transmit)", frequency_hz);
+  } else {
+    ESP_LOGE(TAG, "RF frequency %u Hz not supported by CMT2300A", frequency_hz);
+  }
+}
+
 void TuyaRfComponent::setup() {
   this->RemoteTransmitterBase::pin_->setup();
   this->RemoteTransmitterBase::pin_->digital_write(false);
@@ -98,11 +107,13 @@ void TuyaRfComponent::setup() {
   }
   //the buffer will be allocated the first time the receiver is enabled
 
+  this->set_frequency(this->frequency_hz_);
   this->set_receiver(!this->receiver_disabled_);
 }
 
 void TuyaRfComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Tuya Rf:");
+  ESP_LOGCONFIG(TAG, "  Frequency: %u Hz", this->frequency_hz_);
   LOG_PIN("  Sclk Pin: ",this->sclk_pin_);
   LOG_PIN("  Mosi Pin: ",this->mosi_pin_);
   LOG_PIN("  Csb Pin: ",this->csb_pin_);

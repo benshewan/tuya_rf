@@ -30,6 +30,11 @@ extern "C" {
 int StartTx(void);
 int StartRx(void);
 
+/* Recompute the Frequency Bank (0x18-0x1F) for a target carrier in Hz.
+ * Returns 1 if the frequency is achievable, 0 otherwise (bank left unchanged).
+ * The new values are written to the chip on the next RF_Init()/StartTx(). */
+int RF_SetFrequency(uint32_t freq_hz);
+
 #ifdef __cplusplus 
 } 
 #endif

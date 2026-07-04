@@ -55,8 +55,10 @@ class TuyaRfComponent : public remote_base::RemoteTransmitterBase,
   void set_start_pulse_min_us(uint32_t start_pulse_min_us) { this->start_pulse_min_us_ = start_pulse_min_us; }
   void set_start_pulse_max_us(uint32_t start_pulse_max_us) { this->start_pulse_max_us_ = start_pulse_max_us; }
   void set_end_pulse_us(uint32_t end_pulse_us) { this->end_pulse_us_ = end_pulse_us; }
+  void set_frequency_hz(uint32_t frequency_hz) { this->frequency_hz_ = frequency_hz; }
   void turn_on_receiver();
   void turn_off_receiver();
+  void set_frequency(uint32_t frequency_hz);
 
  protected:
   void send_internal(uint32_t send_times, uint32_t send_wait) override;
@@ -77,6 +79,8 @@ class TuyaRfComponent : public remote_base::RemoteTransmitterBase,
   InternalGPIOPin *mosi_pin_;
   InternalGPIOPin *csb_pin_;
   InternalGPIOPin *fcsb_pin_;
+
+  uint32_t frequency_hz_{433920000};
   
   bool receiver_disabled_{false};
   uint32_t buffer_size_{};

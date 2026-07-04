@@ -26,6 +26,7 @@ CONF_MOSI_PIN = "mosi_pin"
 CONF_CSB_PIN = "csb_pin"
 CONF_FCSB_PIN = "fcsb_pin"
 CONF_RECEIVER_ID = "receiver_id"
+CONF_FREQUENCY = "frequency"
 
 from esphome.core import CORE, TimePeriod
 
@@ -69,12 +70,29 @@ TuyaRfComponent = tuya_rf_ns.class_(
 
 TurnOffReceiverAction = tuya_rf_ns.class_("TurnOffReceiverAction", automation.Action)
 TurnOnReceiverAction = tuya_rf_ns.class_("TurnOnReceiverAction", automation.Action)
+SetFrequencyAction = tuya_rf_ns.class_("SetFrequencyAction", automation.Action)
 
 TUYA_RF_ACTION_SCHEMA = cv.Schema(
     {
         cv.GenerateID(CONF_RECEIVER_ID): cv.use_id(TuyaRfComponent),
     }
 )
+
+
+def validate_frequency(value):
+    value = cv.frequency(value)
+    if not (127e6 <= value <= 1020e6):
+        raise cv.Invalid(f"frequency must be between 127 MHz and 1020 MHz, got {value} Hz")
+    return int(value)
+
+
+TUYA_RF_SET_FREQUENCY_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(CONF_RECEIVER_ID): cv.use_id(TuyaRfComponent),
+        cv.Required(CONF_FREQUENCY): cv.templatable(validate_frequency),
+    }
+)
+
 
 @automation.register_action("tuya_rf.turn_on_receiver", TurnOnReceiverAction, TUYA_RF_ACTION_SCHEMA, synchronous=True)
 async def tuya_rf_turn_on_receiver_to_code(config, action_id, template_arg, args):
@@ -85,6 +103,14 @@ async def tuya_rf_turn_on_receiver_to_code(config, action_id, template_arg, args
 async def tuya_rf_turn_off_receiver_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_RECEIVER_ID])
     return cg.new_Pvariable(action_id, template_arg, paren)
+
+@automation.register_action("tuya_rf.set_frequency", SetFrequencyAction, TUYA_RF_SET_FREQUENCY_SCHEMA, synchronous=True)
+async def tuya_rf_set_frequency_to_code(config, action_id, template_arg, args):
+    paren = await cg.get_variable(config[CONF_RECEIVER_ID])
+    var = cg.new_Pvariable(action_id, template_arg, paren)
+    templ = await cg.templatable(config[CONF_FREQUENCY], args, cg.uint32)
+    cg.add(var.set_frequency(templ))
+    return var
 
 
 def validate_tolerance(value):
@@ -142,6 +168,7 @@ CONFIG_SCHEMA = remote_base.validate_triggers(
                 cv.positive_time_period_microseconds,
                 cv.Range(max=TimePeriod(microseconds=4294967295)),
             ),
+            cv.Optional(CONF_FREQUENCY, default="433.92MHz"): validate_frequency,
         }
     ).extend(cv.COMPONENT_SCHEMA)
 )
@@ -184,4 +211,5 @@ async def to_code(config):
     cg.add(var.set_start_pulse_min_us(config[CONF_START_PULSE_MIN]))
     cg.add(var.set_start_pulse_max_us(config[CONF_START_PULSE_MAX]))
     cg.add(var.set_end_pulse_us(config[CONF_END_PULSE]))
+    cg.add(var.set_frequency_hz(config[CONF_FREQUENCY]))
     validate_pulses(config)

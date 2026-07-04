@@ -131,17 +131,9 @@ const uint8_t g_cmt2300aSystemBank[CMT2300A_SYSTEM_BANK_SIZE] = {
  /* 0x17 */   0x81,
 };
 
-/* [Frequency Bank] */
-const uint8_t g_cmt2300aFrequencyBank[CMT2300A_FREQUENCY_BANK_SIZE] = {
- /* 0x18 */   0x42,
- /* 0x19 */   0x71, //0xA6, //0x71 antes de la transmisión
- /* 0x1A */   0xCE, //0xE7, //0xce antes de la transmisión 
- /* 0x1B */   0x1C,
- /* 0x1C */   0x42,
- /* 0x1D */   0x5b, //0x90,
- /* 0x1E */   0x1C, //0x35,
- /* 0x1F */   0x1C,
-};
+/* [Frequency Bank] - writable; defined in radio.c so RF_SetFrequency() can
+ * retune it at runtime without causing multiple-definition link errors. */
+extern uint8_t g_cmt2300aFrequencyBank[CMT2300A_FREQUENCY_BANK_SIZE];
 
 /* [Data Rate Bank] */
 const uint8_t g_cmt2300aDataRateBank[CMT2300A_DATA_RATE_BANK_SIZE] = {

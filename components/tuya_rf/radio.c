@@ -21,6 +21,74 @@
 #include "radio.h"
 #include "cmt2300a_hal.h"
 #include "cmt2300a_params_captured.h"
+#include <stddef.h>
+#include <stdint.h>
+
+#define RF_CRYSTAL_HZ 26000000ULL
+
+/* Default 433.92 MHz Frequency Bank; retuned at runtime by RF_SetFrequency(). */
+uint8_t g_cmt2300aFrequencyBank[CMT2300A_FREQUENCY_BANK_SIZE] = {
+    /* 0x18 RX N                              */ 0x42,
+    /* 0x19 RX K[7:0]                         */ 0x71,
+    /* 0x1A RX K[15:8]                        */ 0xCE,
+    /* 0x1B PALDO_SEL|DIVX_CODE(001)|RX K hi  */ 0x1C,
+    /* 0x1C TX N                              */ 0x42,
+    /* 0x1D TX K[7:0]                         */ 0x5B,
+    /* 0x1E TX K[15:8]                        */ 0x1C,
+    /* 0x1F FSK_SWT|VCO_BANK(001)|TX K hi     */ 0x1C,
+};
+
+int RF_SetFrequency(uint32_t freq_hz)
+{
+    static const struct { uint8_t divider; uint8_t code; } candidates[] = {
+        {4, 1}, {6, 5}, {8, 2}, {12, 3}, {2, 0}
+    };
+    uint8_t divider = 0, divx_code = 0, vco_bank = 0;
+    size_t i;
+    for (i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+        uint64_t fvco = (uint64_t) freq_hz * candidates[i].divider;
+        if (fvco >= 1680000000ULL && fvco <= 2040000000ULL) {
+            divider = candidates[i].divider; divx_code = candidates[i].code; vco_bank = 1; break;
+        }
+    }
+    if (divider == 0) {
+        for (i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+            uint64_t fvco = (uint64_t) freq_hz * candidates[i].divider;
+            if (fvco >= 1516000000ULL && fvco <= 1680000000ULL) {
+                divider = candidates[i].divider; divx_code = candidates[i].code; vco_bank = 6; break;
+            }
+        }
+    }
+    if (divider == 0)
+        return 0;
+
+    /* TX: f_vco = freq * divider ; N = floor(f_vco / xtal) ; K = round(frac * 2^20) */
+    uint64_t fvco_tx = (uint64_t) freq_hz * divider;
+    uint32_t n_tx = (uint32_t) (fvco_tx / RF_CRYSTAL_HZ);
+    uint64_t rem_tx = fvco_tx - (uint64_t) n_tx * RF_CRYSTAL_HZ;
+    uint32_t k_tx = (uint32_t) ((rem_tx * (1ULL << 20) + RF_CRYSTAL_HZ / 2) / RF_CRYSTAL_HZ);
+
+    /* RX: low-IF offset f_xtal/92 (only relevant if the receiver is enabled) */
+    uint64_t fvco_rx = ((uint64_t) freq_hz + RF_CRYSTAL_HZ / 92) * divider;
+    uint32_t n_rx = (uint32_t) (fvco_rx / RF_CRYSTAL_HZ);
+    uint64_t rem_rx = fvco_rx - (uint64_t) n_rx * RF_CRYSTAL_HZ;
+    uint32_t k_rx = (uint32_t) ((rem_rx * (1ULL << 20) + RF_CRYSTAL_HZ / 2) / RF_CRYSTAL_HZ);
+
+    g_cmt2300aFrequencyBank[0] = (uint8_t) n_rx;
+    g_cmt2300aFrequencyBank[1] = (uint8_t) (k_rx & 0xFF);
+    g_cmt2300aFrequencyBank[2] = (uint8_t) ((k_rx >> 8) & 0xFF);
+    g_cmt2300aFrequencyBank[3] = (g_cmt2300aFrequencyBank[3] & 0x80)
+                               | (uint8_t) (divx_code << 4)
+                               | (uint8_t) ((k_rx >> 16) & 0x0F);
+    g_cmt2300aFrequencyBank[4] = (uint8_t) n_tx;
+    g_cmt2300aFrequencyBank[5] = (uint8_t) (k_tx & 0xFF);
+    g_cmt2300aFrequencyBank[6] = (uint8_t) ((k_tx >> 8) & 0xFF);
+    g_cmt2300aFrequencyBank[7] = (g_cmt2300aFrequencyBank[7] & 0x80)
+                               | (uint8_t) (vco_bank << 4)
+                               | (uint8_t) ((k_tx >> 16) & 0x0F);
+    return 1;
+}
+
 
 int RF_Init(void)
 {
