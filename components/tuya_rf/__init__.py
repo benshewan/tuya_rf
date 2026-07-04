@@ -14,6 +14,8 @@ from esphome.const import (
     CONF_MEMORY_BLOCKS,
     CONF_RMT_CHANNEL,
     CONF_VALUE,
+    CONF_REPEAT,
+    CONF_WAIT_TIME,
 )
 CONF_RECEIVER_DISABLED = "receiver_disabled"
 CONF_RX_PIN = "rx_pin"
@@ -28,6 +30,10 @@ CONF_FCSB_PIN = "fcsb_pin"
 CONF_RECEIVER_ID = "receiver_id"
 CONF_FREQUENCY = "frequency"
 CONF_INVERT_SIGNAL = "invert_signal"
+CONF_LEARN_MODE = "learn_mode"
+CONF_RECEIVE_TIMEOUT = "receive_timeout"
+CONF_RSSI_FLOOR = "rssi_floor"
+CONF_RAW_CAPTURE = "raw_capture"
 
 from esphome.core import CORE, TimePeriod
 
@@ -72,6 +78,7 @@ TuyaRfComponent = tuya_rf_ns.class_(
 TurnOffReceiverAction = tuya_rf_ns.class_("TurnOffReceiverAction", automation.Action)
 TurnOnReceiverAction = tuya_rf_ns.class_("TurnOnReceiverAction", automation.Action)
 SetFrequencyAction = tuya_rf_ns.class_("SetFrequencyAction", automation.Action)
+ReplayLastCaptureAction = tuya_rf_ns.class_("ReplayLastCaptureAction", automation.Action)
 
 TUYA_RF_ACTION_SCHEMA = cv.Schema(
     {
@@ -111,6 +118,24 @@ async def tuya_rf_set_frequency_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg, paren)
     templ = await cg.templatable(config[CONF_FREQUENCY], args, cg.uint32)
     cg.add(var.set_frequency(templ))
+    return var
+
+TUYA_RF_REPLAY_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(CONF_RECEIVER_ID): cv.use_id(TuyaRfComponent),
+        cv.Optional(CONF_REPEAT, default=1): cv.templatable(cv.positive_int),
+        cv.Optional(CONF_WAIT_TIME, default="0s"): cv.templatable(cv.positive_time_period_microseconds),
+    }
+)
+
+@automation.register_action("tuya_rf.replay_last_capture", ReplayLastCaptureAction, TUYA_RF_REPLAY_SCHEMA, synchronous=True)
+async def tuya_rf_replay_last_capture_to_code(config, action_id, template_arg, args):
+    paren = await cg.get_variable(config[CONF_RECEIVER_ID])
+    var = cg.new_Pvariable(action_id, template_arg, paren)
+    repeat = await cg.templatable(config[CONF_REPEAT], args, cg.uint32)
+    cg.add(var.set_repeat(repeat))
+    wait = await cg.templatable(config[CONF_WAIT_TIME], args, cg.uint32)
+    cg.add(var.set_wait(wait))
     return var
 
 
@@ -171,6 +196,15 @@ CONFIG_SCHEMA = remote_base.validate_triggers(
             ),
             cv.Optional(CONF_FREQUENCY, default="433.92MHz"): validate_frequency,
             cv.Optional(CONF_INVERT_SIGNAL, default=True): cv.boolean,
+            cv.Optional(CONF_LEARN_MODE, default=False): cv.boolean,
+            cv.Optional(CONF_RECEIVE_TIMEOUT, default="50ms"): cv.All(
+                cv.positive_time_period_microseconds,
+                cv.Range(max=TimePeriod(microseconds=4294967295)),
+            ),
+            cv.Optional(CONF_RSSI_FLOOR, default=-70): cv.All(
+                cv.int_, cv.Range(min=-128, max=20)
+            ),
+            cv.Optional(CONF_RAW_CAPTURE, default=False): cv.boolean,
         }
     ).extend(cv.COMPONENT_SCHEMA)
 )
@@ -215,4 +249,8 @@ async def to_code(config):
     cg.add(var.set_end_pulse_us(config[CONF_END_PULSE]))
     cg.add(var.set_frequency_hz(config[CONF_FREQUENCY]))
     cg.add(var.set_invert_signal(config[CONF_INVERT_SIGNAL]))
+    cg.add(var.set_learn_mode(config[CONF_LEARN_MODE]))
+    cg.add(var.set_receive_timeout_us(config[CONF_RECEIVE_TIMEOUT]))
+    cg.add(var.set_rssi_floor_dbm(config[CONF_RSSI_FLOOR]))
+    cg.add(var.set_raw_capture(config[CONF_RAW_CAPTURE]))
     validate_pulses(config)

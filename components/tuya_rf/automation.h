@@ -43,6 +43,24 @@ template<typename... Ts> class SetFrequencyAction : public Action<Ts...> {
   TemplatableValue<uint32_t, Ts...> frequency_;
 };
 
+template<typename... Ts> class ReplayLastCaptureAction : public Action<Ts...> {
+ public:
+  ReplayLastCaptureAction(TuyaRfComponent *tuya_rf) : tuya_rf_(tuya_rf) {}
+
+  void play(Ts... x) override {
+    this->tuya_rf_->replay_last_capture(this->repeat_.value(x...), this->wait_.value(x...));
+    this->play_next_(x...);
+  }
+
+  template<typename T> void set_repeat(T repeat) { this->repeat_ = repeat; }
+  template<typename T> void set_wait(T wait) { this->wait_ = wait; }
+
+ protected:
+  TuyaRfComponent *tuya_rf_;
+  TemplatableValue<uint32_t, Ts...> repeat_{1};
+  TemplatableValue<uint32_t, Ts...> wait_{0};
+};
+
 
 }  // namespace tuya_rf
 }  // namespace esphome

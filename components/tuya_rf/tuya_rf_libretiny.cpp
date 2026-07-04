@@ -2,6 +2,8 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include "radio.h"
+#include <algorithm>
+#include <cstdlib>
 #ifdef USE_LIBRETINY
 
 namespace esphome {
@@ -48,6 +50,7 @@ void TuyaRfComponent::turn_off_receiver() {
 }
 
 void TuyaRfComponent::set_receiver(bool on) {
+  this->receiver_active_ = on;
   if (on) {
     ESP_LOGD(TAG, "starting receiver");
     auto &s = this->store_;
@@ -85,10 +88,111 @@ void TuyaRfComponent::set_receiver(bool on) {
 void TuyaRfComponent::set_frequency(uint32_t frequency_hz) {
   if (RF_SetFrequency(frequency_hz)) {
     this->frequency_hz_ = frequency_hz;
+    // If the receiver is currently running, restart it so RX tunes to the new
+    // frequency (RF_Init only runs on StartRx/StartTx). setup() calls this
+    // before the receiver starts, so receiver_active_ is false there.
+    if (this->receiver_active_ && !this->transmitting_) {
+      this->set_receiver(false);
+      this->set_receiver(true);
+    }
     ESP_LOGI(TAG, "RF frequency set to %u Hz (applied on next transmit)", frequency_hz);
   } else {
     ESP_LOGE(TAG, "RF frequency %u Hz not supported by CMT2300A", frequency_hz);
   }
+}
+
+void TuyaRfComponent::replay_last_capture(uint32_t repeat, uint32_t wait) {
+  if (this->last_capture_.empty()) {
+    ESP_LOGW(TAG, "Replay requested but no capture is stored");
+    return;
+  }
+  // Restore the frequency the capture was taken at, so replay is faithful even
+  // if set_frequency was called with a different value in the meantime.
+  if (this->last_capture_frequency_ && this->frequency_hz_ != this->last_capture_frequency_) {
+    ESP_LOGI(TAG, "Restoring capture frequency %u Hz for replay", this->last_capture_frequency_);
+    if (RF_SetFrequency(this->last_capture_frequency_))
+      this->frequency_hz_ = this->last_capture_frequency_;
+  }
+  ESP_LOGI(TAG, "Replaying last capture: %u timings, %u repeat(s)",
+           (unsigned) this->last_capture_.size(), repeat);
+  this->RemoteTransmitterBase::temp_.set_data(this->last_capture_);
+  this->send_internal(repeat, wait);
+}
+
+// On-device cleanup of a learn-mode burst (component convention: negative = mark,
+// positive = space). Splits at large gaps, picks the longest signal-like segment
+// (starts with a mark, tolerates a few glitches, few distinct timing levels), and
+// prepends the inter-repeat gap. Returns empty if no signal-like segment is found.
+std::vector<int32_t> TuyaRfComponent::clean_capture_(const std::vector<int32_t> &raw) {
+  const int32_t SPLIT = 2000;
+  const size_t MIN_LEN = 16;
+  const size_t MAX_GLITCH = 4;   // tolerated alternation violations (CMT2300A is noisy)
+  const size_t MAX_DISTINCT = 9; // real OOK reuses few durations; noise has many
+  const int32_t GAP_LO = 2000;
+  const int32_t GAP_HI = 20000;
+
+  struct Seg { size_t start, len; int32_t gap; };
+  std::vector<Seg> segs;
+  size_t i = 0;
+  int32_t cur_gap = 0;
+  while (i < raw.size()) {
+    int32_t a = raw[i] < 0 ? -raw[i] : raw[i];
+    if (a > SPLIT) { cur_gap = a; i++; }
+    else {
+      size_t s = i;
+      while (i < raw.size()) {
+        int32_t b = raw[i] < 0 ? -raw[i] : raw[i];
+        if (b > SPLIT) break;
+        i++;
+      }
+      segs.push_back({s, i - s, cur_gap});
+      cur_gap = 0;
+    }
+  }
+
+  bool found = false;
+  size_t best_si = 0, best_len = 0, best_glitches = 0;
+  std::vector<int32_t> candidate_gaps;
+  for (size_t si = 0; si < segs.size(); si++) {
+    const Seg &seg = segs[si];
+    if (seg.len < MIN_LEN || raw[seg.start] >= 0)  // must start with a mark (negative)
+      continue;
+    size_t glitches = 0;
+    for (size_t k = 0; k < seg.len; k++) {
+      bool want_mark = (k % 2 == 0);
+      bool is_mark = raw[seg.start + k] < 0;
+      if (want_mark != is_mark) glitches++;
+    }
+    if (glitches > MAX_GLITCH) continue;
+    std::vector<int32_t> buckets;
+    for (size_t k = 0; k < seg.len; k++) {
+      int32_t a = raw[seg.start + k] < 0 ? -raw[seg.start + k] : raw[seg.start + k];
+      buckets.push_back((a + 50) / 100);  // nearest 100us
+    }
+    std::sort(buckets.begin(), buckets.end());
+    buckets.erase(std::unique(buckets.begin(), buckets.end()), buckets.end());
+    if (buckets.size() > MAX_DISTINCT) continue;
+    if (seg.gap >= GAP_LO && seg.gap <= GAP_HI) candidate_gaps.push_back(seg.gap);
+    if (!found || seg.len > best_len ||
+        (seg.len == best_len && glitches < best_glitches)) {
+      found = true; best_si = si; best_len = seg.len; best_glitches = glitches;
+    }
+  }
+
+  if (!found) return {};
+
+  int32_t gap = 0;
+  if (!candidate_gaps.empty()) {
+    std::sort(candidate_gaps.begin(), candidate_gaps.end());
+    gap = candidate_gaps[candidate_gaps.size() / 2];
+  } else if (segs[best_si].gap >= GAP_LO && segs[best_si].gap <= GAP_HI) {
+    gap = segs[best_si].gap;
+  }
+
+  std::vector<int32_t> out;
+  if (gap > 0) out.push_back(gap);
+  for (size_t k = 0; k < best_len; k++) out.push_back(raw[segs[best_si].start + k]);
+  return out;
 }
 
 void TuyaRfComponent::setup() {
@@ -115,6 +219,9 @@ void TuyaRfComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Tuya Rf:");
   ESP_LOGCONFIG(TAG, "  Frequency: %u Hz", this->frequency_hz_);
   ESP_LOGCONFIG(TAG, "  Invert Signal: %s", this->invert_signal_ ? "true" : "false");
+  ESP_LOGCONFIG(TAG, "  Learn Mode: %s", this->learn_mode_ ? "true" : "false");
+  ESP_LOGCONFIG(TAG, "  Raw Capture: %s", this->raw_capture_ ? "true" : "false");
+  ESP_LOGCONFIG(TAG, "  RSSI Floor: %d dBm", this->rssi_floor_dbm_);
   LOG_PIN("  Sclk Pin: ",this->sclk_pin_);
   LOG_PIN("  Mosi Pin: ",this->mosi_pin_);
   LOG_PIN("  Csb Pin: ",this->csb_pin_);
@@ -264,6 +371,77 @@ void TuyaRfComponent::loop() {
   // signals must at least one rising and one leading edge
   if (dist <= 1)
     return;
+
+  if (this->learn_mode_) {
+    // Protocol-agnostic capture: dump whatever is in the buffer once the signal
+    // has been idle for receive_timeout_us_ (or the buffer is about to overflow).
+    const uint32_t now = micros();
+    const uint32_t last_edge = s.buffer[write_at];
+
+    // Sample RSSI (throttled) while there is activity; track the peak so we can
+    // gate the dump on a noise floor.
+    // Sample RSSI as soon as any edge arrives (not waiting for 6) so the reading
+    // is taken while the signal is actually present; loop() may not run often
+    // enough otherwise. Throttled to ~2ms.
+    if (dist > 0 && (now - this->last_rssi_sample_us_) >= 2000) {
+      this->last_rssi_sample_us_ = now;
+      int rssi = CMT2300A_GetRssiDBm();
+      if (rssi > this->capture_peak_rssi_)
+        this->capture_peak_rssi_ = rssi;
+    }
+
+    bool flush = ((dist >= 6) && ((now - last_edge) >= this->receive_timeout_us_)) ||
+                 (dist >= s.buffer_size - 5);  // also flush near overflow
+    if (flush) {
+      uint32_t prev = s.buffer_read_at;
+      s.buffer_read_at = (s.buffer_read_at + 1) % s.buffer_size;
+      this->RemoteReceiverBase::temp_.clear();
+      int32_t multiplier = s.buffer_read_at % 2 == 0 ? 1 : -1;
+      while (prev != write_at) {
+        int32_t delta = s.buffer[s.buffer_read_at] - s.buffer[prev];
+        this->RemoteReceiverBase::temp_.push_back(multiplier * delta);
+        prev = s.buffer_read_at;
+        s.buffer_read_at = (s.buffer_read_at + 1) % s.buffer_size;
+        multiplier *= -1;
+      }
+      s.buffer_read_at = write_at;  // consume the whole burst
+      old_write_at_ = write_at;
+
+      // RSSI is the reliable noise/signal discriminator here (noise sits around
+      // -103 dBm, real remotes around -40 dBm). Anything below the floor is noise
+      // and is discarded quietly. Anything above gets cleaned and logged -- with a
+      // raw fallback so a real signal is never silently dropped if cleanup fails.
+      if (this->capture_peak_rssi_ >= this->rssi_floor_dbm_) {
+        const char *mode = "raw";
+        if (!this->raw_capture_) {
+          std::vector<int32_t> cleaned = this->clean_capture_(this->RemoteReceiverBase::temp_);
+          if (!cleaned.empty()) {
+            this->RemoteReceiverBase::temp_ = std::move(cleaned);
+            mode = "clean";
+          }
+        }
+        ESP_LOGD(TAG, "RF burst captured (%s): %u timings, peak RSSI %d dBm",
+                 mode, (unsigned) this->RemoteReceiverBase::temp_.size(), this->capture_peak_rssi_);
+        this->call_listeners_dumpers_();
+        this->last_capture_ = this->RemoteReceiverBase::temp_;
+        this->last_capture_frequency_ = this->frequency_hz_;
+      } else if (this->capture_peak_rssi_ >= this->rssi_floor_dbm_ - 30) {
+        // Likely a real signal but below the floor -- log at DEBUG so it's
+        // visible and the floor can be tuned, instead of vanishing silently.
+        ESP_LOGD(TAG, "RF signal below floor: %u timings, peak RSSI %d dBm (floor %d)",
+                 (unsigned) this->RemoteReceiverBase::temp_.size(),
+                 this->capture_peak_rssi_, this->rssi_floor_dbm_);
+      } else {
+        ESP_LOGV(TAG, "RF noise discarded: %u timings, peak RSSI %d dBm (floor %d)",
+                 (unsigned) this->RemoteReceiverBase::temp_.size(),
+                 this->capture_peak_rssi_, this->rssi_floor_dbm_);
+      }
+      this->capture_peak_rssi_ = -128;  // reset peak for the next burst
+    } else {
+      old_write_at_ = write_at;
+    }
+    return;
+  }
 
   bool receive_end = false;
 

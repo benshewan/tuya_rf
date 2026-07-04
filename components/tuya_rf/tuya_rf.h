@@ -57,9 +57,14 @@ class TuyaRfComponent : public remote_base::RemoteTransmitterBase,
   void set_end_pulse_us(uint32_t end_pulse_us) { this->end_pulse_us_ = end_pulse_us; }
   void set_frequency_hz(uint32_t frequency_hz) { this->frequency_hz_ = frequency_hz; }
   void set_invert_signal(bool invert) { this->invert_signal_ = invert; }
+  void set_learn_mode(bool learn) { this->learn_mode_ = learn; }
+  void set_receive_timeout_us(uint32_t t) { this->receive_timeout_us_ = t; }
+  void set_rssi_floor_dbm(int32_t floor) { this->rssi_floor_dbm_ = floor; }
+  void set_raw_capture(bool raw) { this->raw_capture_ = raw; }
   void turn_on_receiver();
   void turn_off_receiver();
   void set_frequency(uint32_t frequency_hz);
+  void replay_last_capture(uint32_t repeat, uint32_t wait);
 
  protected:
   void send_internal(uint32_t send_times, uint32_t send_wait) override;
@@ -70,6 +75,7 @@ class TuyaRfComponent : public remote_base::RemoteTransmitterBase,
 
   void await_target_time_();
   void set_receiver(bool on);
+  std::vector<int32_t> clean_capture_(const std::vector<int32_t> &raw);
   uint32_t target_time_;
 #if defined(USE_LIBRETINY)
   RemoteReceiverComponentStore store_;
@@ -83,6 +89,14 @@ class TuyaRfComponent : public remote_base::RemoteTransmitterBase,
 
   uint32_t frequency_hz_{433920000};
   bool invert_signal_{true};
+  bool learn_mode_{false};
+  uint32_t receive_timeout_us_{50000};
+  int32_t rssi_floor_dbm_{-70};
+  int32_t capture_peak_rssi_{-128};
+  uint32_t last_rssi_sample_us_{0};
+  bool raw_capture_{false};
+  std::vector<int32_t> last_capture_;
+  uint32_t last_capture_frequency_{0};
   
   bool receiver_disabled_{false};
   uint32_t buffer_size_{};
@@ -93,6 +107,7 @@ class TuyaRfComponent : public remote_base::RemoteTransmitterBase,
 
   bool transmitting_{false};
   bool receive_started_{false};
+  bool receiver_active_{false};
   uint32_t old_write_at_{0};
 };
 
