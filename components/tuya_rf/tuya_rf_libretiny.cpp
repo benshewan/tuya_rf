@@ -4,6 +4,7 @@
 #include "radio.h"
 #include <algorithm>
 #include <cstdlib>
+#include <cstdio>
 #ifdef USE_LIBRETINY
 
 namespace esphome {
@@ -88,13 +89,11 @@ void TuyaRfComponent::set_receiver(bool on) {
 void TuyaRfComponent::set_frequency(uint32_t frequency_hz) {
   if (RF_SetFrequency(frequency_hz)) {
     this->frequency_hz_ = frequency_hz;
-    // If the receiver is currently running, restart it so RX tunes to the new
-    // frequency (RF_Init only runs on StartRx/StartTx). setup() calls this
-    // before the receiver starts, so receiver_active_ is false there.
-    if (this->receiver_active_ && !this->transmitting_) {
-      this->set_receiver(false);
-      this->set_receiver(true);
-    }
+    // The new frequency bank is applied on the next RF_Init (i.e. the next
+    // StartTx for transmits, or the next StartRx). We intentionally do NOT
+    // restart the receiver here: doing so right before a transmit was found to
+    // degrade the transmission (a spurious GoStby->StartRx immediately ahead of
+    // StartTx). To retune a running receiver, toggle it off/on explicitly.
     ESP_LOGI(TAG, "RF frequency set to %u Hz (applied on next transmit)", frequency_hz);
   } else {
     ESP_LOGE(TAG, "RF frequency %u Hz not supported by CMT2300A", frequency_hz);
@@ -311,7 +310,13 @@ void TuyaRfComponent::space_(uint32_t usec) {
 }
 
 void IRAM_ATTR TuyaRfComponent::send_internal(uint32_t send_times, uint32_t send_wait) {
-  ESP_LOGD(TAG, "Sending remote code...");
+  const auto &data = this->RemoteTransmitterBase::temp_.get_data();
+  ESP_LOGD(TAG, "Sending remote code: %u times, %u items, first6 [%d,%d,%d,%d,%d,%d] last3 [%d,%d,%d]",
+           (unsigned) send_times, (unsigned) data.size(),
+           data.size() > 3 ? data[0] : 0, data.size() > 4 ? data[1] : 0, data.size() > 5 ? data[2] : 0,
+           data.size() > 6 ? data[3] : 0, data.size() > 7 ? data[4] : 0, data.size() > 8 ? data[5] : 0,
+           data.size() >= 3 ? data[data.size() - 3] : 0, data.size() >= 2 ? data[data.size() - 2] : 0,
+           data.size() >= 1 ? data[data.size() - 1] : 0);
   /*
     for (int32_t item : this->temp_.get_data()) {
       if (item > 0) {
@@ -463,6 +468,25 @@ void TuyaRfComponent::loop() {
         ESP_LOGD(TAG, "RF burst captured (%s): %u timings, peak RSSI %d dBm",
                  mode, (unsigned) this->RemoteReceiverBase::temp_.size(), this->capture_peak_rssi_);
         this->call_listeners_dumpers_();
+        if (!this->raw_capture_) {
+          // The ESPHome raw dumper can drop the final value on long codes, so
+          // also print the complete cleaned code here in short lines that won't
+          // be truncated -- safe to copy straight into a transmit_raw code: [].
+          ESP_LOGI(TAG, "Captured code (%u items) -- copy into transmit_raw code:",
+                   (unsigned) this->RemoteReceiverBase::temp_.size());
+          const auto &d = this->RemoteReceiverBase::temp_;
+          for (size_t base = 0; base < d.size(); base += 12) {
+            char buf[200];
+            size_t pos = 0;
+            buf[0] = '\0';
+            for (size_t i = base; i < d.size() && i < base + 12; i++) {
+              int n = snprintf(buf + pos, sizeof(buf) - pos, "%s%d", (i > base ? "," : ""), d[i]);
+              if (n > 0 && (size_t) n < sizeof(buf) - pos)
+                pos += n;
+            }
+            ESP_LOGI(TAG, "  %s", buf);
+          }
+        }
         this->last_capture_ = this->RemoteReceiverBase::temp_;
         this->last_capture_frequency_ = this->frequency_hz_;
       } else if (this->capture_peak_rssi_ >= this->rssi_floor_dbm_ - 30) {
