@@ -120,9 +120,10 @@ void TuyaRfComponent::replay_last_capture(uint32_t repeat, uint32_t wait) {
 }
 
 // On-device cleanup of a learn-mode burst (component convention: negative = mark,
-// positive = space). Splits at large gaps, picks the longest signal-like segment
-// (starts with a mark, tolerates a few glitches, few distinct timing levels), and
-// prepends the inter-repeat gap. Returns empty if no signal-like segment is found.
+// positive = space). Splits at large gaps, finds the signal-like segments (start
+// with a mark, few glitches, few distinct timing levels), averages the repeated
+// ones to denoise the timing, and prepends the inter-repeat gap. Returns empty
+// if no signal-like segment is found.
 std::vector<int32_t> TuyaRfComponent::clean_capture_(const std::vector<int32_t> &raw) {
   const int32_t SPLIT = 2000;
   const size_t MIN_LEN = 16;
@@ -150,8 +151,9 @@ std::vector<int32_t> TuyaRfComponent::clean_capture_(const std::vector<int32_t> 
     }
   }
 
-  bool found = false;
-  size_t best_si = 0, best_len = 0, best_glitches = 0;
+  // Collect valid signal-like segments.
+  struct Cand { size_t si; size_t len; size_t glitches; };
+  std::vector<Cand> cands;
   std::vector<int32_t> candidate_gaps;
   for (size_t si = 0; si < segs.size(); si++) {
     const Seg &seg = segs[si];
@@ -159,9 +161,7 @@ std::vector<int32_t> TuyaRfComponent::clean_capture_(const std::vector<int32_t> 
       continue;
     size_t glitches = 0;
     for (size_t k = 0; k < seg.len; k++) {
-      bool want_mark = (k % 2 == 0);
-      bool is_mark = raw[seg.start + k] < 0;
-      if (want_mark != is_mark) glitches++;
+      if (((k % 2 == 0) != (raw[seg.start + k] < 0))) glitches++;
     }
     if (glitches > MAX_GLITCH) continue;
     std::vector<int32_t> buckets;
@@ -173,25 +173,65 @@ std::vector<int32_t> TuyaRfComponent::clean_capture_(const std::vector<int32_t> 
     buckets.erase(std::unique(buckets.begin(), buckets.end()), buckets.end());
     if (buckets.size() > MAX_DISTINCT) continue;
     if (seg.gap >= GAP_LO && seg.gap <= GAP_HI) candidate_gaps.push_back(seg.gap);
-    if (!found || seg.len > best_len ||
-        (seg.len == best_len && glitches < best_glitches)) {
-      found = true; best_si = si; best_len = seg.len; best_glitches = glitches;
+    cands.push_back({si, seg.len, glitches});
+  }
+  if (cands.empty()) return {};
+
+  // Pick the segment length with the most perfectly-alternating repeats --
+  // those repeats get averaged below to denoise the timing. A single noisy
+  // segment replays marginally; an averaged one (like the script produces from
+  // Flipper captures) decodes reliably.
+  size_t best_len = cands[0].len, best_clean = 0, best_total = 0;
+  for (const auto &c : cands) {
+    size_t clean = 0, total = 0;
+    for (const auto &d : cands) {
+      if (d.len != c.len) continue;
+      total++;
+      if (d.glitches == 0) clean++;
+    }
+    if (clean > best_clean || (clean == best_clean && total > best_total) ||
+        (clean == best_clean && total == best_total && c.len > best_len)) {
+      best_len = c.len; best_clean = clean; best_total = total;
     }
   }
 
-  if (!found) return {};
+  // Gather perfectly-alternating repeats of best_len to average.
+  std::vector<size_t> out_segs;
+  for (const auto &c : cands)
+    if (c.len == best_len && c.glitches == 0) out_segs.push_back(c.si);
+  bool average = out_segs.size() >= 2;
+  if (!average) {
+    // No clean repeats to average -- fall back to the longest valid segment.
+    out_segs.clear();
+    size_t fb_si = cands[0].si, fb_len = cands[0].len;
+    for (const auto &c : cands)
+      if (c.len > fb_len) { fb_len = c.len; fb_si = c.si; }
+    best_len = fb_len;
+    out_segs.push_back(fb_si);
+  }
 
   int32_t gap = 0;
   if (!candidate_gaps.empty()) {
     std::sort(candidate_gaps.begin(), candidate_gaps.end());
     gap = candidate_gaps[candidate_gaps.size() / 2];
-  } else if (segs[best_si].gap >= GAP_LO && segs[best_si].gap <= GAP_HI) {
-    gap = segs[best_si].gap;
   }
 
   std::vector<int32_t> out;
   if (gap > 0) out.push_back(gap);
-  for (size_t k = 0; k < best_len; k++) out.push_back(raw[segs[best_si].start + k]);
+  if (average) {
+    // Position-by-position average; sign by position (even = mark = negative).
+    for (size_t k = 0; k < best_len; k++) {
+      int32_t sum = 0;
+      for (size_t si : out_segs) {
+        int32_t a = raw[segs[si].start + k];
+        sum += a < 0 ? -a : a;
+      }
+      int32_t avg = sum / (int32_t) out_segs.size();
+      out.push_back((k % 2 == 0) ? -avg : avg);
+    }
+  } else {
+    for (size_t k = 0; k < best_len; k++) out.push_back(raw[segs[out_segs[0]].start + k]);
+  }
   return out;
 }
 
