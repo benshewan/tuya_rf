@@ -1,3 +1,88 @@
+# Muti-Frequency Fork
+
+I have a bunch of ceiling fans that use 303.87mhz controllers so I forked the original tuya_rf and slopped in the support for it.
+keep in mind while this does let you use whatever sub-ghz frequency you need you may need to replace the antenna to get better range.
+
+I'm using this on a couple of cheap NAS-IR02W6-Pro ir/rf bridges from aliexpress [see here](https://www.aliexpress.com/item/1005006809864336.html), these use a 433mhz antenna which means that while it did work on my 303.87mhz devices, it only really worked when it was about 6in away. This device does have a standard UFl connector and an ok amount of space in the bottom of the case, so you can replace it with something better.
+
+## Learning mode
+
+I also replaced the basic receiver stuff in the original code with a (hopefully) better system that filters out irrelevant noise based on a configurable rssi threshold and tries it's best to clean up the signal and spit it out on the logs. 
+
+In practice I found this worked probably about 75% of the time, sometimes it couldn't get a clean scan and it would only give you part of the full signal but you can just press the button again. When learning I also expose a entity you can use to "repeat" the last detected signal, which is useful for testing before writing it into your config and re-flashing to test out the new code. 
+
+You can also tell if you got a good signal just by looking at how many segments it returned and if it's consistent, like all the codes on my 433Mhz remote were 66 segments long while my 303Mhz remote used 26 segments for it's commands.
+
+Also note that if your RSSI floor is too high that it will log if it sees something just below the RSSI floor so you'll know if you need to change the floor.
+
+## Configuration
+
+To configure things like the RSSI floor, learning mode, default frequency, etc.. take a look at the options table below:
+
+| Option | Default | Description |
+|---|---|---|
+| `id` | auto | Component ID |
+| `sclk_pin` | `P14` | CMT2300A SPI clock pin |
+| `mosi_pin` | `P16` | CMT2300A SPI MOSI/SDIO pin |
+| `csb_pin` | `P6` | CMT2300A config chip-select |
+| `fcsb_pin` | `P26` | CMT2300A FIFO chip-select |
+| `tx_pin` | `P20` | RF transmit pin |
+| `rx_pin` | `P22` | RF receive pin |
+| `frequency` | `433.92MHz` | Carrier (127 MHz – 1020 MHz, validated) |
+| `invert_signal` | `true` | Mark/space polarity (negative = mark when true) |
+| `learn_mode` | `false` | Protocol-agnostic capture mode |
+| `rssi_floor` | `-70` | dBm noise threshold (-128 to 20) |
+| `receive_timeout` | `50ms` | Idle period that finalizes a learn capture |
+| `raw_capture` | `false` | Bypass cleanup, dump raw burst |
+| `dump` | `[]` | Dumper list (e.g. `raw`) |
+| `tolerance` | `25%` | Match tolerance (`percentage` or `time` typed schema) |
+| `buffer_size` | `1000b` | Receive buffer size in bytes |
+
+## Actions
+
+| Action | Parameters | Description |
+|---|---|---|
+| `tuya_rf.set_frequency` | `frequency` (required, templatable) | Change the carrier frequency at runtime (127 MHz – 1020 MHz) |
+| `tuya_rf.replay_last_capture` | `repeat` (default `1`), `wait_time` (default `0s`) | Transmit the most recent learned code (both templatable) |
+| `tuya_rf.turn_on_receiver` | — | Enable learn-mode capture (starts the receiver) |
+| `tuya_rf.turn_off_receiver` | — | Disable learn-mode capture (stops the receiver) |
+
+All actions accept an optional `receiver_id` to target a specific `tuya_rf` instance (auto-selected when only one is defined).
+
+
+## Examples
+
+```yaml
+tuya_rf:
+  id: rf
+  learn_mode: true # Enable receiving and frequency processing
+  rssi_floor: -70 # dBm; bursts weaker than this are treated as noise
+  receive_timeout: 200ms # time block to treat as one code for learning, 200ms is fine, just don't spam the buttons.
+  frequency: 303.87MHz # Default frequency, frequency does change as you use the tuya_rf.set_frequency command, but this is what it will initially set it to.
+  dump: raw
+```
+
+```yaml
+button:
+  - platform: template
+    name: "Light Down"
+    on_press:
+      - tuya_rf.set_frequency: # Setting frequency, not needed if the default frequency is what you need and your not mixing different frequencies
+          frequency: 433.92MHz
+      - switch.turn_on: status_led
+      - remote_transmitter.transmit_raw:
+          transmitter_id: rf
+          # Code copied from the learning mode.
+          code: [3438,-854,375,-218,1001,-228,979,-250,968,-229,1000,-218,979,-239,989,-843,364,-229,1000,-219,1000,-229,979,-239,968,-260,979,-823,385,-844,375,-229,990,-250,958,-250,979,-239,979,-844,374,-239,958,-865,374,-219,999,-833,385,-218,979,-250,979,-229,1000,-823,385,-229,980,-853,364,-218,1010,-823,385,-218]
+          repeat:
+            # How many times to repeat the signal, might need to increase if it's not reliable, though keep in mind this can't fix it if you have a weak antenna
+            times: 7
+            wait_time: 0s
+      - switch.turn_off: status_led
+```
+
+
+
 # tuya_rf
 Custom component to integrate a tuya rf433 hub into esphome.
 
@@ -62,4 +147,3 @@ and `tuya_rf.turn_off_receiver` (to turn it off).
 Once the code is fixed to work with multiple instances of tuya_rf (currently
 it only allows one instance) you shuould specify the `receiver_id` in the
 action.
-
