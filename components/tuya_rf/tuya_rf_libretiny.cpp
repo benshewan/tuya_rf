@@ -33,8 +33,8 @@ void IRAM_ATTR HOT RemoteReceiverComponentStore::gpio_intr(RemoteReceiverCompone
 }
 
 void TuyaRfComponent::turn_on_receiver() {
-  if (this->receiver_disabled_) {
-    this->receiver_disabled_=false;
+  if (!this->learn_mode_) {
+    this->learn_mode_=true;
     this->set_receiver(true);
    } else {
      ESP_LOGD(TAG,"receiver already active");
@@ -42,8 +42,8 @@ void TuyaRfComponent::turn_on_receiver() {
 }
 
 void TuyaRfComponent::turn_off_receiver() {
-  if (!this->receiver_disabled_) {
-    this->receiver_disabled_=true;
+  if (this->learn_mode_) {
+    this->learn_mode_=false;
     this->set_receiver(false);
    } else {
      ESP_LOGD(TAG,"receiver already disabled");
@@ -251,7 +251,7 @@ void TuyaRfComponent::setup() {
   //the buffer will be allocated the first time the receiver is enabled
 
   this->set_frequency(this->frequency_hz_);
-  this->set_receiver(!this->receiver_disabled_);
+  this->set_receiver(this->learn_mode_);
 }
 
 void TuyaRfComponent::dump_config() {
@@ -279,11 +279,6 @@ void TuyaRfComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Filter out pulses shorter than: %u us", this->filter_us_);
   ESP_LOGCONFIG(TAG, "  Signal start with a pulse between %u and %u us", this->start_pulse_min_us_, this->start_pulse_max_us_);
   ESP_LOGCONFIG(TAG, "  Signal is done after a pulse of %u us", this->end_pulse_us_);
-  if (this->receiver_disabled_) {
-    ESP_LOGCONFIG(TAG, "  Receiver disabled");
-  } else {
-    ESP_LOGCONFIG(TAG, "  Receiver enabled");
-  }
 }
 
 void TuyaRfComponent::await_target_time_() {
@@ -377,7 +372,7 @@ void IRAM_ATTR TuyaRfComponent::send_internal(uint32_t send_times, uint32_t send
   this->await_target_time_();
   
   this->transmitting_=false;
-  if (this->receiver_disabled_) {
+  if (!this->learn_mode_) {
     if(CMT2300A_GoStby()) {
       //ESP_LOGD(TAG,"go stby ok");
     } else {
@@ -386,7 +381,7 @@ void IRAM_ATTR TuyaRfComponent::send_internal(uint32_t send_times, uint32_t send
   } else {
     //Go back to rx mode
     StartRx();
-  } 
+  }
 }
 
 /*
@@ -404,7 +399,7 @@ The rf input is quite noisy, so some heavy filtering must be done:
     reception, the parameter to detect it is end_pulse_us_.
 */
 void TuyaRfComponent::loop() {
-  if (this->receiver_disabled_) {
+  if (!this->learn_mode_) {
     return;
   }  
   auto &s = this->store_;

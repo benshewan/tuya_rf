@@ -17,7 +17,6 @@ from esphome.const import (
     CONF_REPEAT,
     CONF_WAIT_TIME,
 )
-CONF_RECEIVER_DISABLED = "receiver_disabled"
 CONF_RX_PIN = "rx_pin"
 CONF_TX_PIN = "tx_pin"
 CONF_START_PULSE_MIN = "start_pulse_min"
@@ -174,7 +173,6 @@ CONFIG_SCHEMA = remote_base.validate_triggers(
             cv.Optional(CONF_FCSB_PIN, default='P26'): cv.All(pins.internal_gpio_output_pin_schema),
             cv.Optional(CONF_TX_PIN, default='P20'): cv.All(pins.internal_gpio_output_pin_schema),
             cv.Optional(CONF_RX_PIN, default='P22'): cv.All(pins.internal_gpio_input_pin_schema),
-            cv.Optional(CONF_RECEIVER_DISABLED, default=False): cv.boolean,
             cv.Optional(CONF_DUMP, default=[]): remote_base.validate_dumpers,
             cv.Optional(CONF_TOLERANCE, default="25%"): validate_tolerance,
             cv.Optional(CONF_BUFFER_SIZE, default="1000b"): cv.validate_bytes,
@@ -241,7 +239,6 @@ async def to_code(config):
             config[CONF_TOLERANCE][CONF_VALUE], config[CONF_TOLERANCE][CONF_TYPE]
         )
     )
-    cg.add(var.set_receiver_disabled(config[CONF_RECEIVER_DISABLED]))
     cg.add(var.set_buffer_size(config[CONF_BUFFER_SIZE]))
     cg.add(var.set_filter_us(config[CONF_FILTER]))
     cg.add(var.set_start_pulse_min_us(config[CONF_START_PULSE_MIN]))

@@ -49,7 +49,6 @@ class TuyaRfComponent : public remote_base::RemoteTransmitterBase,
   void loop() override;
   float get_setup_priority() const override { return setup_priority::DATA; }
 
-  void set_receiver_disabled(bool receiver_disabled) { this->receiver_disabled_ = receiver_disabled; }
   void set_buffer_size(uint32_t buffer_size) { this->buffer_size_ = buffer_size; }
   void set_filter_us(uint32_t filter_us) { this->filter_us_ = filter_us; }
   void set_start_pulse_min_us(uint32_t start_pulse_min_us) { this->start_pulse_min_us_ = start_pulse_min_us; }
@@ -98,7 +97,6 @@ class TuyaRfComponent : public remote_base::RemoteTransmitterBase,
   std::vector<int32_t> last_capture_;
   uint32_t last_capture_frequency_{0};
   
-  bool receiver_disabled_{false};
   uint32_t buffer_size_{};
   uint32_t filter_us_{50};
   uint32_t start_pulse_min_us_{6000};
